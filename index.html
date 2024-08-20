@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>FAN Control</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <style>
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        cursor: pointer;
+        outline: none;
+        border-radius: 15px;
+        height: 6px;
+        background: #ccc;
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 15px;
+        width: 15px;
+        background-color: #f50;
+        border-radius: 50%;
+        border: none;
+        transition: 0.2s ease-in-out;
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        height: 15px;
+        width: 15px;
+        background-color: #f50;
+        border-radius: 50%;
+        border: none;
+        transition: 0.2s ease-in-out;
+      }
+
+      input[type="range"]::-webkit-slider-thumb:hover {
+        box-shadow: 0 0 0 10px rgba(255, 85, 0, 0.1);
+      }
+      input[type="range"]:active::-webkit-slider-thumb {
+        box-shadow: 0 0 0 13px rgba(255, 85, 0, 0.2);
+      }
+      input[type="range"]:focus::-webkit-slider-thumb {
+        box-shadow: 0 0 0 13px rgba(255, 85, 0, 0.2);
+      }
+
+      input[type="range"]::-moz-range-thumb:hover {
+        box-shadow: 0 0 0 10px rgba(255, 85, 0, 0.1);
+      }
+      input[type="range"]:active::-moz-range-thumb {
+        box-shadow: 0 0 0 13px rgba(255, 85, 0, 0.2);
+      }
+      input[type="range"]:focus::-moz-range-thumb {
+        box-shadow: 0 0 0 13px rgba(255, 85, 0, 0.2);
+      }
+
+      body {
+        font-family: system-ui;
+      }
+
+      h1 {
+        color: #4b4949;
+        text-align: center;
+      }
+
+      .range {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        max-width: 500px;
+        margin: 0 auto;
+        height: 4rem;
+        width: 80%;
+        background: #fff;
+        padding: 0px 10px;
+      }
+
+      .wrapper-value {
+        font-size: 26px;
+      }
+
+      .value {
+        width: 50px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Fan Speed: <span id="currentSpeed">0</span> RPM</h1>
+
+    <div class="wrapper">
+      <div class="range">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value="0"
+          id="range"
+          onchange="setSpeed(this.value)"
+        />
+        <div class="wrapper-value"><span class="value">0</span>%</div>
+      </div>
+    </div>
+
+    <script>
+      async function getSpeedInternal(params) {
+        getSpeed();
+      }
+
+      async function getSpeed() {
+        try {
+          const data = await fetch("/getspeed");
+          const currentSpeed = await data.json();
+
+          document.getElementById("currentSpeed").innerText = currentSpeed;
+
+          setTimeout(getSpeedInternal, 1e3);
+        } catch (error) {
+          return alert("ESP disconnected");
+        }
+      }
+
+      async function setSpeed(speed) {
+        await fetch("/setspeed?speed=" + speed);
+      }
+
+      const sliderEl = document.querySelector("#range");
+      const sliderValue = document.querySelector(".value");
+
+      sliderEl.addEventListener("input", (event) => {
+        const tempSliderValue = event.target.value;
+
+        sliderValue.textContent = tempSliderValue;
+
+        const progress = (tempSliderValue / sliderEl.max) * 100;
+
+        sliderEl.style.background = `linear-gradient(to right, #f50 ${progress}%, #ccc ${progress}%)`;
+      });
+
+      window.onload = () => {
+        getSpeed();
+      };
+    </script>
+  </body>
+</html>
