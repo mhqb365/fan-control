@@ -1,14 +1,21 @@
 #include <ESP8266WiFi.h>
+#include <WiFiClient.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+#include <ESP8266HTTPUpdateServer.h>
+
+const char* updateHost = "esp8266-webupdate";
+const char* updateEndpoint = "/firmware";
+const char* updateUsername = "admin";
+const char* updatePassword = "admin";
+const char* ssidWifi = "Archer C7"; // Thay tên WIFI vào (chỉ dùng được WIFI 2.4G)
+const char* passwordWifi = "0987718868"; // Thay mật khẩu WIFI vào
 
 const int hallSensorPin = D3; // Chân D3 trên ESP, kết nối với dây cảm biến quạt (dây màu vàng)
 const int fanPWMPin = D1; // Chân D1 trên ESP, dây PWM điều khiển quạt (dây màu xanh)
 volatile unsigned long pulseCount = 0;
 unsigned long previousMillis = 0;
 const long interval = 1000; // Thời gian để tính tốc độ quạt (1 giây)
-
-const char* ssid = "Archer C7"; // Tên WIFI
-const char* password = "0987718868"; // Mật khẩu WIFI
 float currentRPM = 0;
 
 const char* indexPage = R"rawliteral(
@@ -163,14 +170,11 @@ const char* indexPage = R"rawliteral(
 
 )rawliteral";
 
-ESP8266WebServer server(80);
+ESP8266WebServer httpServer(80);
+ESP8266HTTPUpdateServer httpUpdater;
 
 void IRAM_ATTR countPulse() {
   pulseCount++;
-}
-
-void handleRoot() {
-  server.send(200, "text/html", indexPage);
 }
 
 void setFanSpeed(int percentage) {
@@ -183,22 +187,27 @@ void setFanSpeed(int percentage) {
   analogWrite(fanPWMPin, pwmValue);
 }
 
+void handleRoot() {
+  httpServer.send(200, "text/html", indexPage);
+}
+
 void handleGetSpeed() {
-  server.send(200, "text/plain", String(currentRPM));
+  httpServer.send(200, "text/plain", String(currentRPM));
 }
 
 void handleSetSpeed() {
-  if (server.hasArg("speed")) {
-    int speed = server.arg("speed").toInt();
+  if (httpServer.hasArg("speed")) {
+    int speed = httpServer.arg("speed").toInt();
     setFanSpeed(speed);
-    server.send(200, "text/plain", "SUCCESS");
+    httpServer.send(200, "text/plain", "SUCCESS");
   } else {
-    server.send(400, "text/plain", "FAIL");
+    httpServer.send(400, "text/plain", "FAIL");
   }
 }
 
-void setup() {
-  Serial.begin(9600);
+void setup(void) {
+  // Khởi tạo serial với baud 115200
+  Serial.begin(115200);
 
   pinMode(hallSensorPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), countPulse, FALLING);
@@ -206,34 +215,42 @@ void setup() {
   pinMode(fanPWMPin, OUTPUT);
   analogWrite(fanPWMPin, 0);
 
-  Serial.println("");
-  Serial.println("");
-  Serial.print("Connect to WIFI");
+  Serial.println();
+  Serial.println();
+  Serial.println("ESP booting...");
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(ssidWifi, passwordWifi);
 
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.print(".");
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    WiFi.begin(ssidWifi, passwordWifi);
+    Serial.println("WIFI connecting...");
   }
-  Serial.println("Connected. ");
-  Serial.print("IP address: ");
+  // In địa chỉ IP
+  Serial.print("ESP address: ");
   Serial.println(WiFi.localIP());
+  MDNS.begin(updateHost);
+  // Tạo server
 
-  server.on("/", handleRoot);
-  server.on("/getspeed", handleGetSpeed);
-  server.on("/setspeed", handleSetSpeed);
-  server.begin();
-  Serial.println("WebServer started");
+  httpServer.on("/", handleRoot);
+  httpServer.on("/getspeed", handleGetSpeed);
+  httpServer.on("/setspeed", handleSetSpeed);
+
+  httpUpdater.setup(&httpServer, updateEndpoint, updateUsername, updatePassword);
+  httpServer.begin();
+
+  MDNS.addService("http", "tcp", 80);
+  Serial.printf("Firmware update at ESP address/firmware");
 }
 
-void loop() {
+void loop(void) {
+
   unsigned long currentMillis = millis();
 
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
 
     // Tính tốc độ quạt
-    float rpm = (pulseCount / 2) * (60000 / interval);  // Chia cho 2 vì mỗi vòng quạt có 2 xung (từ trường đi qua cảm biến)
+    float rpm = (pulseCount / 2) * (60000 / interval); // Chia cho 2 vì mỗi vòng quạt có 2 xung (từ trường đi qua cảm biến)
     currentRPM = rpm;
     pulseCount = 0;
 
@@ -242,5 +259,5 @@ void loop() {
     Serial.println(" RPM");
   }
 
-  server.handleClient();
+  httpServer.handleClient();
 }
