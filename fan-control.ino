@@ -4,21 +4,29 @@
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
 
-const char* updateHost = "esp8266-webupdate";
-const char* updateEndpoint = "/firmware";
-const char* updateUsername = "admin";
-const char* updatePassword = "admin";
-const char* ssidWifi = "Archer C7"; // Thay tên WIFI vào (chỉ dùng được WIFI 2.4G)
-const char* passwordWifi = "0987718868"; // Thay mật khẩu WIFI vào
+// Thiết lập access point
+const char *ssidWifiAP = "ESP";           // Tên WIFI của ESP
+const char *passwordWifiAP = "12345678";  // Mật khẩu của ESP
+IPAddress ip(192, 168, 1, 1);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
 
-const int hallSensorPin = D3; // Chân D3 trên ESP, kết nối với dây cảm biến quạt (dây màu vàng)
-const int fanPWMPin = D1; // Chân D1 trên ESP, dây PWM điều khiển quạt (dây màu xanh)
+// thiết lập update OTA
+const char *updateHost = "esp";
+const char *updateEndpoint = "/firmware";
+const char *updateUsername = "admin";  // Username khi up fw
+const char *updatePassword = "admin";  // Mật khẩu khi up fw
+
+// Thiết lập chức năng ESP
+const int hallSensorPin = D2;  // Chân D2 trên ESP, kết nối với dây cảm biến quạt (thường là dây màu vàng)
+const int fanPWMPin = D1;      // Chân D1 trên ESP, dây PWM điều khiển quạt (thường là dây màu xanh)
 volatile unsigned long pulseCount = 0;
 unsigned long previousMillis = 0;
-const long interval = 1000; // Thời gian để tính tốc độ quạt (1 giây)
+const long interval = 1000;  // Thời gian để tính tốc độ quạt (1 giây)
+int speed = 66;
 float currentRPM = 0;
 
-const char* indexPage = R"rawliteral(
+const char *indexPage = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -107,8 +115,13 @@ const char* indexPage = R"rawliteral(
         width: 50px;
         text-align: center;
       }
+
+      .wifi-connect {
+        width: fit-content;
+      }
     </style>
   </head>
+
   <body>
     <h1>Fan Speed: <span id="currentSpeed">0</span> RPM</h1>
 
@@ -126,20 +139,62 @@ const char* indexPage = R"rawliteral(
       </div>
     </div>
 
+    <div class="wifi-connect">
+      <label for="fname">SSID</label><br />
+      <input type="text" id="ssid" /><br />
+      <label for="lname">Password</label><br />
+      <input type="text" id="password" /><br />
+      <button id="btnConnectWifi" onclick="setWifiConnect()">Connect</button>
+
+      <p id="newAddress" style="display: none">
+        IP address in network is <span id="newIpAddress"></span>
+      </p>
+    </div>
+
     <script>
-      async function getSpeedInternal(params) {
+      async function setWifiConnect() {
+        document.querySelector("#btnConnectWifi").disabled = true;
+        const ssid = document.querySelector("#ssid").value;
+        const password = document.querySelector("#password").value;
+
+        let data = await fetch(
+          "/setwifi?ssid=" + ssid + "&password=" + password
+        );
+        data = await data.text();
+        // console.log(data);
+        document.querySelector("#btnConnectWifi").disabled = false;
+
+        if (data === "FAIL")
+          return alert("Connect WIFI fail, refresh site then connect again");
+
+        document.querySelector("#newIpAddress").innerText = data;
+        document.querySelector("#newAddress").style.display = "block";
+      }
+
+      async function getSpeedInternal() {
         getSpeed();
       }
 
       async function getSpeed() {
         try {
-          const data = await fetch("/getspeed");
-          const currentSpeed = await data.json();
+          let data = await fetch("/getspeed");
 
-          document.getElementById("currentSpeed").innerText = currentSpeed;
+          data = await data.text();
+          data = data.split(",");
+
+          const currentSpeed = data[0];
+          const range = data[1];
+
+          document.querySelector("#currentSpeed").innerText = currentSpeed;
+          document.querySelector(".value").innerText = range;
+          document.querySelector("#range").value = range;
+          document.querySelector(
+            "#range"
+          ).style.background = `linear-gradient(to right, #f50 ${range}%, #ccc ${range}%)`;
 
           setTimeout(getSpeedInternal, 1e3);
         } catch (error) {
+          console.log(error);
           return alert("ESP disconnected");
         }
       }
@@ -162,7 +217,7 @@ const char* indexPage = R"rawliteral(
       });
 
       window.onload = () => {
-        getSpeed();
+        // getSpeed();
       };
     </script>
   </body>
@@ -192,14 +247,45 @@ void handleRoot() {
 }
 
 void handleGetSpeed() {
-  httpServer.send(200, "text/plain", String(currentRPM));
+  httpServer.send(200, "text/plain", String(currentRPM) + ',' + String(speed));
 }
 
 void handleSetSpeed() {
   if (httpServer.hasArg("speed")) {
-    int speed = httpServer.arg("speed").toInt();
+    speed = httpServer.arg("speed").toInt();
     setFanSpeed(speed);
     httpServer.send(200, "text/plain", "SUCCESS");
+  } else {
+    httpServer.send(400, "text/plain", "FAIL");
+  }
+}
+
+void handleSetWifi() {
+  int count = 0;
+  if (httpServer.hasArg("ssid")) {
+    Serial.println("Connect to " + String(httpServer.arg("ssid")) + ":" + String(httpServer.arg("password")));
+
+    WiFi.begin(String(httpServer.arg("ssid")), String(httpServer.arg("password")));
+
+    while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+      WiFi.begin(String(httpServer.arg("ssid")), String(httpServer.arg("password")));
+      Serial.println("Retry...");
+
+      count++;
+
+      if (count == 3) {
+        Serial.println("Connect fail");
+        return httpServer.send(400, "text/plain", "FAIL");
+      }
+    }
+
+    Serial.print("Connected with address " + WiFi.localIP().toString());
+
+    httpServer.send(200, "text/plain", WiFi.localIP().toString());
+
+    Serial.setTimeout(3000);
+
+    // WiFi.softAPdisconnect();
   } else {
     httpServer.send(400, "text/plain", "FAIL");
   }
@@ -213,50 +299,46 @@ void setup(void) {
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), countPulse, FALLING);
 
   pinMode(fanPWMPin, OUTPUT);
-  analogWrite(fanPWMPin, 0);
+  analogWrite(fanPWMPin, speed);
 
   Serial.println();
   Serial.println();
   Serial.println("ESP booting...");
+
   WiFi.mode(WIFI_AP_STA);
-  WiFi.begin(ssidWifi, passwordWifi);
+  WiFi.softAP(ssidWifiAP, passwordWifiAP);
+  WiFi.softAPConfig(ip, gateway, subnet);
 
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    WiFi.begin(ssidWifi, passwordWifi);
-    Serial.println("WIFI connecting...");
-  }
-  // In địa chỉ IP
-  Serial.print("ESP address: ");
-  Serial.println(WiFi.localIP());
   MDNS.begin(updateHost);
-  // Tạo server
 
+  // Tạo server
   httpServer.on("/", handleRoot);
   httpServer.on("/getspeed", handleGetSpeed);
   httpServer.on("/setspeed", handleSetSpeed);
+  httpServer.on("/setwifi", handleSetWifi);
 
   httpUpdater.setup(&httpServer, updateEndpoint, updateUsername, updatePassword);
   httpServer.begin();
 
   MDNS.addService("http", "tcp", 80);
-  Serial.printf("Firmware update at ESP address/firmware");
+
+  Serial.println("Boot success");
 }
 
 void loop(void) {
-
   unsigned long currentMillis = millis();
 
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
 
     // Tính tốc độ quạt
-    float rpm = (pulseCount / 2) * (60000 / interval); // Chia cho 2 vì mỗi vòng quạt có 2 xung (từ trường đi qua cảm biến)
+    float rpm = (pulseCount / 2) * (60000 / interval);  // Chia cho 2 vì mỗi vòng quạt có 2 xung (từ trường đi qua cảm biến)
     currentRPM = rpm;
     pulseCount = 0;
 
-    Serial.print("Fan Speed: ");
-    Serial.print(rpm);
-    Serial.println(" RPM");
+    // Serial.print("Fan Speed: ");
+    // Serial.print(rpm);
+    // Serial.println(" RPM");
   }
 
   httpServer.handleClient();

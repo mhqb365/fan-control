@@ -86,8 +86,13 @@
         width: 50px;
         text-align: center;
       }
+
+      .wifi-connect {
+        width: fit-content;
+      }
     </style>
   </head>
+
   <body>
     <h1>Fan Speed: <span id="currentSpeed">0</span> RPM</h1>
 
@@ -105,20 +110,62 @@
       </div>
     </div>
 
+    <div class="wifi-connect">
+      <label for="fname">SSID</label><br />
+      <input type="text" id="ssid" /><br />
+      <label for="lname">Password</label><br />
+      <input type="text" id="password" /><br />
+      <button id="btnConnectWifi" onclick="setWifiConnect()">Connect</button>
+
+      <p id="newAddress" style="display: none">
+        IP address in network is <span id="newIpAddress"></span>
+      </p>
+    </div>
+
     <script>
-      async function getSpeedInternal(params) {
+      async function setWifiConnect() {
+        document.querySelector("#btnConnectWifi").disabled = true;
+        const ssid = document.querySelector("#ssid").value;
+        const password = document.querySelector("#password").value;
+
+        let data = await fetch(
+          "/setwifi?ssid=" + ssid + "&password=" + password
+        );
+        data = await data.text();
+        // console.log(data);
+        document.querySelector("#btnConnectWifi").disabled = false;
+
+        if (data === "FAIL")
+          return alert("Connect WIFI fail, refresh site then connect again");
+
+        document.querySelector("#newIpAddress").innerText = data;
+        document.querySelector("#newAddress").style.display = "block";
+      }
+
+      async function getSpeedInternal() {
         getSpeed();
       }
 
       async function getSpeed() {
         try {
-          const data = await fetch("/getspeed");
-          const currentSpeed = await data.json();
+          let data = await fetch("/getspeed");
 
-          document.getElementById("currentSpeed").innerText = currentSpeed;
+          data = await data.text();
+          data = data.split(",");
+
+          const currentSpeed = data[0];
+          const range = data[1];
+
+          document.querySelector("#currentSpeed").innerText = currentSpeed;
+          document.querySelector(".value").innerText = range;
+          document.querySelector("#range").value = range;
+          document.querySelector(
+            "#range"
+          ).style.background = `linear-gradient(to right, #f50 ${range}%, #ccc ${range}%)`;
 
           setTimeout(getSpeedInternal, 1e3);
         } catch (error) {
+          console.log(error);
           return alert("ESP disconnected");
         }
       }
@@ -141,7 +188,7 @@
       });
 
       window.onload = () => {
-        getSpeed();
+        // getSpeed();
       };
     </script>
   </body>
